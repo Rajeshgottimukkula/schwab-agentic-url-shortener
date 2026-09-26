@@ -3,6 +3,7 @@ package com.rajesh.urlshortener.api;
 import com.rajesh.urlshortener.error.ShortUrlExceptionHandler;
 import com.rajesh.urlshortener.service.CreatedShortUrl;
 import com.rajesh.urlshortener.service.ShortUrlCreationService;
+import com.rajesh.urlshortener.service.ShortUrlRedirectService;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -18,6 +19,7 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
@@ -27,15 +29,17 @@ import static org.springframework.test.web.servlet.setup.MockMvcBuilders.standal
 class ShortUrlControllerTest {
 
     private ShortUrlCreationService service;
+    private ShortUrlRedirectService redirectService;
     private LocalValidatorFactoryBean validator;
     private MockMvc mockMvc;
 
     @BeforeEach
     void setUp() {
         service = mock(ShortUrlCreationService.class);
+        redirectService = mock(ShortUrlRedirectService.class);
         validator = new LocalValidatorFactoryBean();
         validator.afterPropertiesSet();
-        mockMvc = standaloneSetup(new ShortUrlController(service))
+        mockMvc = standaloneSetup(new ShortUrlController(service), new RedirectController(redirectService))
                 .setControllerAdvice(new ShortUrlExceptionHandler())
                 .setValidator(validator)
                 .build();
@@ -151,5 +155,29 @@ class ShortUrlControllerTest {
                                 """))
                 .andExpect(status().isInternalServerError())
                 .andExpect(jsonPath("$.detail").value("The short URL could not be created"));
+    }
+
+    @Test
+    void redirectsWith302AndStoredDestination() throws Exception {
+        when(redirectService.resolveAndRecordClick("Ab12Cd34"))
+                .thenReturn("https://example.com/path?source=test#section");
+
+        mockMvc.perform(get("/Ab12Cd34"))
+                .andExpect(status().isFound())
+                .andExpect(header().string("Location", "https://example.com/path?source=test#section"));
+
+        verify(redirectService).resolveAndRecordClick("Ab12Cd34");
+    }
+
+    @Test
+    void mapsUnknownOrExpiredRedirectToProblemDetail404() throws Exception {
+        when(redirectService.resolveAndRecordClick("missing"))
+                .thenThrow(new com.rajesh.urlshortener.service.ShortUrlNotFoundException("missing"));
+
+        mockMvc.perform(get("/missing"))
+                .andExpect(status().isNotFound())
+                .andExpect(content().contentTypeCompatibleWith("application/problem+json"))
+                .andExpect(jsonPath("$.status").value(404))
+                .andExpect(jsonPath("$.detail").value("The short URL does not exist or has expired"));
     }
 }
