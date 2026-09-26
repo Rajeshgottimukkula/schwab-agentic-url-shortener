@@ -3,6 +3,8 @@ package com.rajesh.urlshortener.api;
 import com.rajesh.urlshortener.error.ShortUrlExceptionHandler;
 import com.rajesh.urlshortener.service.CreatedShortUrl;
 import com.rajesh.urlshortener.service.ShortUrlCreationService;
+import com.rajesh.urlshortener.service.LookedUpShortUrl;
+import com.rajesh.urlshortener.service.ShortUrlLookupService;
 import com.rajesh.urlshortener.service.ShortUrlRedirectService;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -30,6 +32,7 @@ class ShortUrlControllerTest {
 
     private ShortUrlCreationService service;
     private ShortUrlRedirectService redirectService;
+    private ShortUrlLookupService lookupService;
     private LocalValidatorFactoryBean validator;
     private MockMvc mockMvc;
 
@@ -37,9 +40,12 @@ class ShortUrlControllerTest {
     void setUp() {
         service = mock(ShortUrlCreationService.class);
         redirectService = mock(ShortUrlRedirectService.class);
+        lookupService = mock(ShortUrlLookupService.class);
         validator = new LocalValidatorFactoryBean();
         validator.afterPropertiesSet();
-        mockMvc = standaloneSetup(new ShortUrlController(service), new RedirectController(redirectService))
+        mockMvc = standaloneSetup(
+                        new ShortUrlController(service, lookupService), new RedirectController(redirectService)
+                )
                 .setControllerAdvice(new ShortUrlExceptionHandler())
                 .setValidator(validator)
                 .build();
@@ -175,6 +181,41 @@ class ShortUrlControllerTest {
                 .thenThrow(new com.rajesh.urlshortener.service.ShortUrlNotFoundException("missing"));
 
         mockMvc.perform(get("/missing"))
+                .andExpect(status().isNotFound())
+                .andExpect(content().contentTypeCompatibleWith("application/problem+json"))
+                .andExpect(jsonPath("$.status").value(404))
+                .andExpect(jsonPath("$.detail").value("The short URL does not exist or has expired"));
+    }
+
+    @Test
+    void looksUpMappingAndBuildsShortUrlFromCurrentRequest() throws Exception {
+        Instant expiresAt = Instant.parse("2026-12-31T23:59:59Z");
+        when(lookupService.lookup("Ab12Cd34"))
+                .thenReturn(new LookedUpShortUrl("Ab12Cd34", "https://example.com/path", expiresAt, 7));
+
+        mockMvc.perform(get("/api/v1/urls/Ab12Cd34")
+                        .with(request -> {
+                            request.setScheme("https");
+                            request.setServerName("short.example");
+                            request.setServerPort(443);
+                            return request;
+                        }))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value("Ab12Cd34"))
+                .andExpect(jsonPath("$.originalUrl").value("https://example.com/path"))
+                .andExpect(jsonPath("$.expiresAt").value("2026-12-31T23:59:59Z"))
+                .andExpect(jsonPath("$.clickCount").value(7))
+                .andExpect(jsonPath("$.shortUrl").value("https://short.example/Ab12Cd34"));
+
+        verify(lookupService).lookup("Ab12Cd34");
+    }
+
+    @Test
+    void unknownLookupReturnsSanitizedProblemDetail404() throws Exception {
+        when(lookupService.lookup("missing"))
+                .thenThrow(new com.rajesh.urlshortener.service.ShortUrlNotFoundException("missing"));
+
+        mockMvc.perform(get("/api/v1/urls/missing"))
                 .andExpect(status().isNotFound())
                 .andExpect(content().contentTypeCompatibleWith("application/problem+json"))
                 .andExpect(jsonPath("$.status").value(404))
