@@ -6,13 +6,17 @@ import com.rajesh.urlshortener.service.ShortUrlCreationService;
 import com.rajesh.urlshortener.service.LookedUpShortUrl;
 import com.rajesh.urlshortener.service.ShortUrlLookupService;
 import com.rajesh.urlshortener.service.ShortUrlRedirectService;
+import com.rajesh.urlshortener.service.ShortCodeGenerationException;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.validation.beanvalidation.LocalValidatorFactoryBean;
+import org.springframework.boot.test.system.CapturedOutput;
+import org.springframework.boot.test.system.OutputCaptureExtension;
 import java.sql.SQLException;
 import java.time.Instant;
 
@@ -20,6 +24,7 @@ import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
@@ -28,6 +33,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 import static org.springframework.test.web.servlet.setup.MockMvcBuilders.standaloneSetup;
 
+@ExtendWith(OutputCaptureExtension.class)
 class ShortUrlControllerTest {
 
     private ShortUrlCreationService service;
@@ -150,17 +156,58 @@ class ShortUrlControllerTest {
     }
 
     @Test
-    void doesNotExposePersistenceErrorDetails() throws Exception {
+    void persistenceFailureIsLoggedAndReturnsSanitizedProblemDetail(CapturedOutput output) throws Exception {
         when(service.create(eq("https://example.com"), eq(null)))
                 .thenThrow(new DataIntegrityViolationException("SQL secret", new SQLException("database secret")));
 
-        mockMvc.perform(post("/api/v1/urls")
+        String response = mockMvc.perform(post("/api/v1/urls")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
                                 {"url":"https://example.com"}
                                 """))
                 .andExpect(status().isInternalServerError())
-                .andExpect(jsonPath("$.detail").value("The short URL could not be created"));
+                .andExpect(jsonPath("$.detail").value("The request could not be completed"))
+                .andReturn().getResponse().getContentAsString();
+
+        assertFalse(response.contains("SQL secret"));
+        assertFalse(response.contains("database secret"));
+        org.junit.jupiter.api.Assertions.assertTrue(output.toString().contains("Persistence failure"));
+        org.junit.jupiter.api.Assertions.assertTrue(output.toString().contains("DataIntegrityViolationException"));
+        org.junit.jupiter.api.Assertions.assertFalse(output.toString().contains("SQL secret"));
+        org.junit.jupiter.api.Assertions.assertFalse(output.toString().contains("database secret"));
+    }
+
+    @Test
+    void unexpectedFailureIsLoggedAndReturnsSanitizedProblemDetail(CapturedOutput output) throws Exception {
+        when(lookupService.lookup("Ab12Cd34"))
+                .thenThrow(new IllegalStateException("internal diagnostic detail"));
+
+        String response = mockMvc.perform(get("/api/v1/urls/Ab12Cd34"))
+                .andExpect(status().isInternalServerError())
+                .andExpect(jsonPath("$.detail").value("The request could not be completed"))
+                .andReturn().getResponse().getContentAsString();
+
+        assertFalse(response.contains("internal diagnostic detail"));
+        org.junit.jupiter.api.Assertions.assertTrue(output.toString().contains("Unexpected failure"));
+        org.junit.jupiter.api.Assertions.assertTrue(output.toString().contains("IllegalStateException"));
+        org.junit.jupiter.api.Assertions.assertFalse(output.toString().contains("internal diagnostic detail"));
+    }
+
+    @Test
+    void codeGenerationFailureRemainsSanitized503() throws Exception {
+        when(service.create(eq("https://example.com"), eq(null)))
+                .thenThrow(new ShortCodeGenerationException(new IllegalStateException("private database detail")));
+
+        String response = mockMvc.perform(post("/api/v1/urls")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"url":"https://example.com"}
+                                """))
+                .andExpect(status().isServiceUnavailable())
+                .andExpect(jsonPath("$.detail").value("A unique short code could not be allocated"))
+                .andReturn().getResponse().getContentAsString();
+
+        assertFalse(response.contains("private database detail"));
     }
 
     @Test

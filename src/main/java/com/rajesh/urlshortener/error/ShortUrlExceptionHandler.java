@@ -3,6 +3,8 @@ package com.rajesh.urlshortener.error;
 import com.rajesh.urlshortener.service.ShortCodeGenerationException;
 import com.rajesh.urlshortener.service.ShortUrlNotFoundException;
 import jakarta.servlet.http.HttpServletRequest;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.dao.DataAccessException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ProblemDetail;
@@ -16,6 +18,8 @@ import java.net.URI;
 
 @RestControllerAdvice
 public class ShortUrlExceptionHandler {
+
+    private static final Logger LOGGER = LoggerFactory.getLogger(ShortUrlExceptionHandler.class);
 
     @ExceptionHandler({MethodArgumentNotValidException.class, HttpMessageNotReadableException.class,
             IllegalArgumentException.class})
@@ -46,14 +50,18 @@ public class ShortUrlExceptionHandler {
             DataAccessException exception,
             HttpServletRequest request
     ) {
+        LOGGER.error("Persistence failure for request {} ({})",
+                request.getRequestURI(), exception.getClass().getSimpleName());
         return problem(HttpStatus.INTERNAL_SERVER_ERROR, "Request failed",
-                "The short URL could not be created", request);
+                "The request could not be completed", request);
     }
 
     @ExceptionHandler(Exception.class)
     public ResponseEntity<ProblemDetail> handleUnexpectedFailure(Exception exception, HttpServletRequest request) {
+        LOGGER.error("Unexpected failure for request {} ({})",
+                request.getRequestURI(), exception.getClass().getSimpleName());
         return problem(HttpStatus.INTERNAL_SERVER_ERROR, "Request failed",
-                "The short URL could not be created", request);
+                "The request could not be completed", request);
     }
 
     private ResponseEntity<ProblemDetail> problem(
