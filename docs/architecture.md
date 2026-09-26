@@ -8,7 +8,7 @@ The application is a Java 21 and Spring Boot modular monolith. Its approved firs
 - `GET /{code}` to resolve a mapping, atomically increment its aggregate click count, and redirect with `302 Found`. Unknown and expired codes return `404 Not Found`.
 - `GET /api/v1/urls/{code}` to return mapping information, including the click count, without exposing JPA entities or persistence details.
 
-This task establishes structure and persistence scaffolding only. It does not implement those endpoints or business operations.
+The application implements the approved URL-shortener API scope described above. The implementation was built incrementally across the engineering tasks, with architecture and persistence established first and the API/business operations added and validated in subsequent tasks.
 
 ## Modules and responsibilities
 
