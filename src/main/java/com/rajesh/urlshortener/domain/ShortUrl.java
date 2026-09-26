@@ -37,6 +37,13 @@ public class ShortUrl {
     @Column(name = "click_count", nullable = false)
     private long clickCount;
 
+    public ShortUrl(String shortCode, String originalUrl, Instant createdAt, Instant expiresAt) {
+        this.shortCode = shortCode;
+        this.originalUrl = originalUrl;
+        this.createdAt = createdAt;
+        this.expiresAt = expiresAt;
+    }
+
     protected ShortUrl() {
         // Required by JPA.
     }
